@@ -1,0 +1,90 @@
+<?php
+/**
+ * @author    G2A Team
+ * @copyright Copyright (c) 2016 G2A.COM
+ * @license   http://opensource.org/licenses/osl-3.0.php  Open Software License (OSL 3.0)
+ * @file
+ * Install, update, and uninstall functions for the Commerce G2A Pay module.
+ */
+
+/**
+ * Implementation of hook_requirements().
+ *
+ * Ensures that cURL is installed
+ */
+function commerce_g2apay_requirements($phase)
+{
+    $requirements = array();
+    $t            = get_t();
+
+    if ($phase == 'runtime') {
+        $library                = libraries_detect('g2apay');
+        $requirements['g2apay'] = array(
+            'title' => $t('G2A Pay API library'),
+        );
+        if ($library['installed']) {
+            $requirements['g2apay']['value']    = $library['version'];
+            $requirements['g2apay']['severity'] = REQUIREMENT_OK;
+        } else {
+            $requirements['g2apay']['value']       = $library['error'];
+            $requirements['g2apay']['description'] = $library['error message'];
+            $requirements['g2apay']['severity']    = REQUIREMENT_ERROR;
+        }
+    }
+
+    return $requirements;
+}
+
+/**
+ * Implements hook_schema().
+ */
+function commerce_g2apay_schema()
+{
+    $schema = array();
+
+    $schema['commerce_g2apay_ipn'] = array(
+        'description' => 'Stores processed IPNs.',
+        'fields'      => array(
+            'id' => array(
+                'description' => 'ID of the IPN in the local database.',
+                'type'        => 'serial',
+                'unsigned'    => true,
+                'not null'    => true,
+            ),
+            'order_id' => array(
+                'description' => 'Paid order Id',
+                'type'        => 'int',
+                'unsigned'    => true,
+                'not null'    => true,
+                'default'     => 0,
+            ),
+            'transaction_id' => array(
+                'description' => 'G2A Pay transaction id',
+                'type'        => 'varchar',
+                'length'      => 60,
+                'not null'    => true,
+            ),
+            'status' => array(
+                'description' => 'G2A Pay payment status',
+                'type'        => 'varchar',
+                'length'      => 30,
+                'not null'    => true,
+                'default'     => 'Paid',
+            ),
+            'amount_paid' => array(
+                'description' => 'Amount paid via G2A Pay',
+                'type'        => 'float',
+                'not null'    => true,
+            ),
+            'amount_refunded' => array(
+                'description' => 'Amount refunded via G2A Pay',
+                'type'        => 'float',
+                'not null'    => true,
+                'default'     => 0,
+            ),
+        ),
+        'primary key' => array('id'),
+    );
+
+    return $schema;
+}

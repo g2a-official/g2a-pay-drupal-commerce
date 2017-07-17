@@ -1,0 +1,268 @@
+<?php
+/**
+ * @author    G2A Team
+ * @copyright Copyright (c) 2016 G2A.COM
+ * @license   http://opensource.org/licenses/osl-3.0.php  Open Software License (OSL 3.0)
+ */
+require_once 'include' . DIRECTORY_SEPARATOR . 'commerce_g2apay.refund.php';
+/**
+ * Implements hook_menu().
+ */
+function commerce_g2apay_menu()
+{
+    return array(
+        'commerce_g2apay/ipn' => array(
+            'page callback'   => 'commerce_g2apay_notification',
+            'access callback' => true,
+            'type'            => MENU_CALLBACK,
+        ),
+        'admin/commerce/manage-orders/g2apay_orders' => array(
+            'title'            => 'G2A Pay Orders',
+            'page callback'    => 'commerce_g2apay_orders_table',
+            'access arguments' => array('access administration pages'),
+            'weight'           => 88,
+        ),
+        'admin/commerce/manage-orders/g2apay_orders/refund/%' => array(
+            'title'           => 'Refund',
+            'page callback'   => 'drupal_get_form',
+            'page arguments'  => array('commerce_g2apay_refund_form', 2),
+            'access callback' => true,
+        ),
+    );
+}
+
+/**
+ * Create table with orders paid by G2A Pay.
+ *
+ * @return null|string
+ * @throws Exception
+ */
+function commerce_g2apay_orders_table()
+{
+    libraries_load('g2apay');
+    $header = array(
+        t('Id'),
+        t('Order Id'),
+        t('Price'),
+        t('Status'),
+        t('Amount Paid'),
+        t('Amount Refunded'),
+        t('Action'),
+    );
+    $rows  = array();
+    $query = db_select(\g2apay\G2APayHelper::G2A_IPN_DB_TABLE_NAME, 't')->fields('t', array(
+        'id',
+        'order_id',
+        'status',
+        'amount_paid',
+        'amount_refunded',
+    ));
+    $query = $query->extend('TableSort')->extend('PagerDefault')->limit(50);
+    $query = $query->execute();
+    while ($value = $query->fetchAssoc()) {
+        $ow                  = entity_metadata_wrapper('commerce_order', $value['order_id']);
+        $order_total         = $ow->commerce_order_total->value();
+        $refund_capture_link = \g2apay\G2APayHelper::REFUND_CAPTURE_LINK . $value['order_id'];
+        $rows[]              = array(
+            $value['id'],
+            l(t('Commerce order: @id', array('@id' => $value['order_id'])), \g2apay\G2APayHelper::COMMERCE_ORDERS_LINK
+                . $value['order_id']), 'Order amount: ' . commerce_currency_format($order_total['amount'],
+                $order_total['currency_code']),
+            t($value['status']),
+            commerce_currency_format($value['amount_paid'], $order_total['currency_code']),
+            commerce_currency_format($value['amount_refunded'], $order_total['currency_code']),
+            $value['status'] !== ucfirst(\g2apay\G2APayIpn::STATUS_REFUNDED) ? l(t('Refund'), $refund_capture_link) : '',
+        );
+    }
+    if (!count($rows)) {
+        return t('There are no orders yet.');
+    } else {
+        return theme('table', array('header' => $header, 'rows' => $rows)) . theme('pager');
+    }
+}
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_g2apay_commerce_payment_method_info()
+{
+    return array(
+        'g2apay' => array(
+            'base'                 => 'commerce_g2apay',
+            'title'                => t('G2A Pay'),
+            'short_title'          => t('G2A Pay'),
+            'display_title'        => t('G2A Pay'),
+            'description'          => t('Easily integrate 100+ global and local payment methods with all-in-one solution.'),
+            'terminal'             => false,
+            'offsite'              => true,
+            'offsite_autoredirect' => true,
+        ),
+    );
+}
+
+/**
+ * Returns the default settings for the G2A Pay payment method.
+ */
+function commerce_g2apay_default_settings()
+{
+    return array(
+        'api_secret'     => '',
+        'api_hash'       => '',
+        'merchant_email' => '',
+        'payment_mode'   => 'sandbox',
+    );
+}
+
+/**
+ * Implements hook_page_alter().
+ */
+function commerce_g2apay_page_alter(&$page)
+{
+    global $base_url;
+    libraries_load('g2apay');
+    if (!empty($page['content']['system_main']['#page_callback']) &&
+        $page['content']['system_main']['#page_callback'] === \g2apay\G2APayHelper::COMMERCE_PAYMENT_ADMIN_PAGE_NAME) {
+        // Ensure we loop over both enabled and disabled rules.
+        foreach (array('enabled', 'disabled') as $key) {
+            foreach ($page['content']['system_main'][$key]['rules']['#rows'] as $row_key => &$row) {
+                if (strpos($row[0]['data']['description']['settings']['machine_name']['#markup'],
+                        'commerce_payment_g2apay') > 0) {
+                    $row[0]['data']['#suffix'] = '<div class="service-description">Set your <strong>IPN URL</strong>
+                        to:<br /><nobr><pre>' . $base_url . '/commerce_g2apay/ipn</pre></nobr></div></div>';
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Payment method callback: settings form.
+ */
+function commerce_g2apay_settings_form($settings = array())
+{
+    $form = array();
+
+    // Merge default settings into the stored settings array.
+    $settings = (array) $settings + commerce_g2apay_default_settings();
+
+    $form['api_secret'] = array(
+        '#type'          => 'textfield',
+        '#title'         => t('Api Secret'),
+        '#description'   => t('Your G2A Pay Api Secret.'),
+        '#default_value' => $settings['api_secret'],
+        '#size'          => 25,
+        '#required'      => true,
+    );
+    $form['api_hash'] = array(
+        '#type'          => 'textfield',
+        '#title'         => t('Api Hash'),
+        '#description'   => t('Your G2A Pay Api Hash.'),
+        '#default_value' => $settings['api_hash'],
+        '#size'          => 25,
+        '#required'      => true,
+    );
+    $form['merchant_email'] = array(
+        '#type'          => 'textfield',
+        '#title'         => t('Merchant Email'),
+        '#description'   => t('Your G2A Pay Merchant Email.'),
+        '#default_value' => $settings['merchant_email'],
+        '#size'          => 25,
+        '#required'      => true,
+    );
+    $form['payment_mode'] = array(
+        '#type'        => 'select',
+        '#title'       => t('Payment mode'),
+        '#description' => t('Choose production or sandbox server.'),
+        '#options'     => array(
+            'production' => t('Production'),
+            'sandbox'    => t('Sandbox'),
+        ),
+        '#default_value' => $settings['payment_mode'],
+    );
+
+    return $form;
+}
+
+/**
+ * Payment method callback, payment redirect form.
+ *
+ * @param $form
+ * @param $form_state
+ * @param $order
+ * @param $payment_method
+ * @return array|void
+ */
+function commerce_g2apay_redirect_form($form, &$form_state, $order, $payment_method)
+{
+    libraries_load('g2apay');
+    // Return an error if some settings are missing
+    if (empty($payment_method['settings']['api_secret'])
+        || empty($payment_method['settings']['api_hash'])
+        || empty($payment_method['settings']['merchant_email'])) {
+        drupal_set_message(t('G2A Pay module is not configured properly.'), 'error');
+
+        return array();
+    }
+
+    $postVars = \g2apay\G2APayHelper::prepareVarsArray($order, $payment_method['settings']);
+
+    /** @var $client G2APayClient */
+    $client = new \g2apay\G2APayClient(\g2apay\G2APayHelper::getPaymentUrl($payment_method['settings']['payment_mode'])
+        . 'createQuote');
+    $client->setMethod(\g2apay\G2APayClient::METHOD_POST);
+    $response = $client->request($postVars);
+
+    try {
+        if (empty($response['token'])) {
+            throw new \g2apay\G2APayException('Empty Token');
+        }
+        $form['submit'] = array(
+            '#type'   => 'submit',
+            '#weight' => 100,
+            '#value'  => t('Go to payment '),
+        );
+        $form['#action'] = \g2apay\G2APayHelper::getPaymentUrl($payment_method['settings']['payment_mode'],
+                $response['token']);
+    } catch (\g2apay\G2APayException $ex) {
+        drupal_set_message(t('Some error occurs processing payment'), 'error');
+    }
+
+    return $form;
+}
+
+/**
+ * Implements hook_libraries_info().
+ *
+ * @return mixed
+ */
+function commerce_g2apay_libraries_info()
+{
+    return array(
+        'g2apay' => array(
+            'name'              => 'G2A Pay library',
+            'vendor url'        => 'http://pay.g2a.com/',
+            'download url'      => 'http://pay.g2a.com/',
+            'version arguments' => array(
+                'file'    => 'VERSION',
+                'pattern' => '/^(.+)/',
+            ),
+            'files' => array(
+                'php' => array(
+                    'lib/g2apay.php',
+                ),
+            ),
+        ),
+    );
+}
+
+/**
+ * Handling Notification_URL.
+ */
+function commerce_g2apay_notification()
+{
+    libraries_load('g2apay');
+
+    $g2aPayIpn = new \g2apay\G2APayIpn();
+    $message   = $g2aPayIpn->processIpn();
+    echo $message;
+}
