@@ -1,4 +1,6 @@
-# G2A Pay module for Drupal Commerce
+# ⚠ This repository is now DEPRECATED and will be deleted after 1st of August 2021. We recommend to use [Zen](https://www.zen.com/) in new projects.
+
+## G2A Pay module for Drupal Commerce
 
 Drupal Commerce - Used to build websites and applications regardless of the size, Drupal Commerce now focuses on what you can build with its framework mindset. Furthermore, Drupal enables creating product types with custom attributes, dynamic product displays and allows different payment gateways thanks to the API payment method. At the same time, it allows developers to build customized eCommerce solutions for their websites at the core level as well as integration with the following systems: D’7 Fields, Views, Rules and Entity API.
 
